@@ -69,7 +69,7 @@ class LeRobotConverter:
             return None
 
         if len(log_files) > 1:
-            logger.warning(
+            logger.warn(
                 f"Multiple log files found: {[f.name for f in log_files]}. "
                 f"Using the first one: {log_files[0].name}"
             )
@@ -120,7 +120,7 @@ class LeRobotConverter:
         if is_v3:
             logger.info("Detected v3.0 dataset format (merged episodes)")
             if chunks is not None:
-                logger.warning(
+                logger.warn(
                     "Chunks parameter is ignored for v3.0 datasets. "
                     "All episodes are in shared files."
                 )
@@ -178,7 +178,7 @@ class LeRobotConverter:
                         last_episode_config = cfg
                         success_count += 1
                     else:
-                        logger.warning(
+                        logger.warn(
                             f"Skipping episode {episode_idx} in chunk {chunk_idx}: {error}"
                         )
                         fail_count += 1
@@ -196,7 +196,7 @@ class LeRobotConverter:
                     last_episode_config = cfg
                     success_count += 1
                 else:
-                    logger.warning(
+                    logger.warn(
                         f"Skipping episode {ep_idx} in chunk {ch_idx}: {error}"
                     )
                     fail_count += 1
@@ -223,7 +223,7 @@ class LeRobotConverter:
         logger.info("=" * SEPARATOR_WIDTH)
         logger.info(f"Successfully converted: {success_count} episodes")
         if fail_count > 0:
-            logger.warning(f"Failed/Skipped: {fail_count} episodes")
+            logger.warn(f"Failed/Skipped: {fail_count} episodes")
         logger.info(f"Output directory: {output_dir}")
         logger.info("=" * SEPARATOR_WIDTH)
 
@@ -258,7 +258,7 @@ class LeRobotConverter:
                 missing_videos.append(video_key)
 
         if missing_videos:
-            logger.warning(
+            logger.warn(
                 f"Episode {episode_idx}: Missing videos: {missing_videos}. "
                 "These will be skipped."
             )
@@ -340,7 +340,7 @@ class LeRobotConverter:
                 missing_videos.append(video_key)
 
         if missing_videos:
-            logger.warning(
+            logger.warn(
                 f"Episode {episode_idx}: Missing videos: {missing_videos}. "
                 "These will be skipped."
             )
@@ -603,7 +603,7 @@ class LeRobotConverter:
             shutil.copy2(config_path, dest)
             logger.info(f"Updated example config: {dest}")
         except Exception as e:
-            logger.warning(f"Failed to update example config: {e}")
+            logger.warn(f"Failed to update example config: {e}")
 
     def get_conversion_plan(self, chunks: list[int] | None = None) -> str:
         """

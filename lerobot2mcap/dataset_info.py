@@ -118,7 +118,7 @@ class DatasetInfo:
         """
         episodes_dir = self.dataset_root / "meta" / "episodes"
         if not episodes_dir.exists():
-            logger.warning(
+            logger.warn(
                 f"Episodes metadata directory not found: {episodes_dir}. "
                 "This is required for v3.0 datasets."
             )
@@ -127,7 +127,7 @@ class DatasetInfo:
         # Find all episode metadata parquet files
         episode_files = sorted(episodes_dir.glob("chunk-*/file-*.parquet"))
         if not episode_files:
-            logger.warning(f"No episode metadata files found in {episodes_dir}")
+            logger.warn(f"No episode metadata files found in {episodes_dir}")
             return
 
         # Load and concatenate all episode metadata
@@ -137,13 +137,13 @@ class DatasetInfo:
                 df = pd.read_parquet(ep_file)
                 dfs.append(df)
             except Exception as e:
-                logger.warning(f"Failed to load episode metadata from {ep_file}: {e}")
+                logger.warn(f"Failed to load episode metadata from {ep_file}: {e}")
 
         if dfs:
             self._episodes_df = pd.concat(dfs, ignore_index=True)
             logger.info(f"Loaded metadata for {len(self._episodes_df)} episodes")
         else:
-            logger.warning("No episode metadata could be loaded")
+            logger.warn("No episode metadata could be loaded")
 
     def get_episode_info(self, episode_index: int) -> dict:
         """
@@ -210,7 +210,7 @@ class DatasetInfo:
                     "to_timestamp": float(row[f"{video_prefix}to_timestamp"]),
                 }
             except KeyError:
-                logger.warning(
+                logger.warn(
                     f"Video metadata for {video_key} not found in episode {episode_index}"
                 )
 
@@ -493,7 +493,7 @@ class DatasetInfo:
             Writer format (e.g., "ros1", "ros2", "json", "protobuf")
             Defaults to "ros2" for LeRobot datasets.
         """
-        return self.data.get("writer_format", "ros2")
+        return self.data.get("writer_format", "json")
 
     def get_video_frame_id(self, video_key: str) -> str:
         """
