@@ -493,7 +493,7 @@ class DatasetInfo:
             Writer format (e.g., "ros1", "ros2", "json", "protobuf")
             Defaults to "ros2" for LeRobot datasets.
         """
-        return self.data.get("writer_format", "json")
+        return self.data.get("writer_format", "ros2")
 
     def get_video_frame_id(self, video_key: str) -> str:
         """

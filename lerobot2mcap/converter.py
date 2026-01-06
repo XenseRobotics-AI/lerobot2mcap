@@ -196,9 +196,7 @@ class LeRobotConverter:
                     last_episode_config = cfg
                     success_count += 1
                 else:
-                    logger.warn(
-                        f"Skipping episode {ep_idx} in chunk {ch_idx}: {error}"
-                    )
+                    logger.warn(f"Skipping episode {ep_idx} in chunk {ch_idx}: {error}")
                     fail_count += 1
 
         # Save a single config file named after output directory
