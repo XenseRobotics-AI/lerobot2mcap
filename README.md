@@ -120,7 +120,7 @@ The tool provides two main commands: `download` and `convert`.
 
 ```bash
 # Download and convert in one command (downloads from Hugging Face)
-lerobot2mcap download lerobot/pusht -o ./data
+lerobot2mcap download lerobot/pusht
 
 # Or convert an existing dataset
 lerobot2mcap convert ~/.cache/huggingface/lerobot/pusht -o ./mcap_output
@@ -128,29 +128,33 @@ lerobot2mcap convert ~/.cache/huggingface/lerobot/pusht -o ./mcap_output
 
 ### Command: `download`
 
-Download LeRobot datasets from Hugging Face Hub. The dataset will be downloaded and then automatically converted to MCAP.
+Download LeRobot datasets from Hugging Face Hub and automatically convert to MCAP.
 
 ```bash
-# Download full dataset
-lerobot2mcap download lerobot/pusht -o ./data
+# Download full dataset (uses default HF cache, outputs to ./lerobot_pusht_mcap/)
+lerobot2mcap download lerobot/pusht
+
+# Download with custom MCAP output directory
+lerobot2mcap download lerobot/pusht -o ./my_mcap_output
 
 # Download specific episodes only
-lerobot2mcap download lerobot/pusht -o ./data -e 0 1 2
+lerobot2mcap download lerobot/pusht -e 0 1 2
 
-# Without output dir (defaults to ./data)
-lerobot2mcap download lerobot/pusht
+# Parallel conversion with 8 workers
+lerobot2mcap download lerobot/pusht -j8
 ```
 
 **Arguments:**
 
 - `dataset_id`: Hugging Face dataset ID (e.g., `lerobot/pusht`)
-- `-o, --output-dir`: Output directory (default: `./data`)
+- `-o, --output-dir`: Output directory for MCAP files (default: `./{dataset_name}_mcap`)
 - `-e, --episodes`: Specific episode indices to download (default: all episodes)
+- `-j, --jobs`: Number of parallel workers (default: 1/4 of CPU cores)
 
 **Output:**
 
-- Downloads dataset to `<output-dir>/`
-- Creates MCAP files in `<output-dir>/mcap_conversion/`
+- Downloads dataset to HuggingFace cache (`~/.cache/huggingface/lerobot/`)
+- Creates MCAP files in specified output directory (or `./{dataset_name}_mcap`)
 
 ### Command: `convert`
 
