@@ -81,6 +81,7 @@ class LeRobotConverter:
         output_dir: Path,
         chunks: list[int] | None = None,
         episodes: list[int] | None = None,
+        num_workers: int = 1,
     ) -> bool:
         """
         Convert the LeRobot dataset to MCAP format.
@@ -91,6 +92,7 @@ class LeRobotConverter:
             output_dir: Directory where MCAP files will be saved
             chunks: List of chunk indices to convert (None = all chunks)
             episodes: List of episode indices to convert (None = all episodes)
+            num_workers: Number of parallel workers (default: 1)
         Returns:
             True if conversion succeeded, False otherwise
         """
@@ -143,26 +145,77 @@ class LeRobotConverter:
         # Convert each episode
         success_count = 0
         fail_count = 0
+        last_episode_config = None
 
-        last_config_path: Path | None = None
-
-        for chunk_idx, episode_idx in tqdm(
-            all_conversions,
-            desc="Converting episodes",
-            unit="episode",
-        ):
+        def convert_one(args):
+            """Convert a single episode. Returns (success, config, error)."""
+            chunk_idx, episode_idx = args
             try:
                 if is_v3:
-                    cfg_path = self._convert_episode_v3(episode_idx, output_dir)
+                    cfg = self._convert_episode_v3(episode_idx, output_dir)
                 else:
-                    cfg_path = self._convert_episode(episode_idx, chunk_idx, output_dir)
-                last_config_path = cfg_path
-                success_count += 1
+                    cfg = self._convert_episode(episode_idx, chunk_idx, output_dir)
+                return (True, cfg, None, episode_idx, chunk_idx)
             except Exception as e:
-                logger.warning(
-                    f"Skipping episode {episode_idx} in chunk {chunk_idx}: {e}"
+                return (False, None, str(e), episode_idx, chunk_idx)
+
+        if num_workers > 1:
+            # Parallel conversion using ThreadPoolExecutor
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = {
+                    executor.submit(convert_one, args): args for args in all_conversions
+                }
+                for future in tqdm(
+                    as_completed(futures),
+                    total=len(all_conversions),
+                    desc=f"Converting episodes ({num_workers} workers)",
+                    unit="episode",
+                ):
+                    success, cfg, error, episode_idx, chunk_idx = future.result()
+                    if success:
+                        last_episode_config = cfg
+                        success_count += 1
+                    else:
+                        logger.warning(
+                            f"Skipping episode {episode_idx} in chunk {chunk_idx}: {error}"
+                        )
+                        fail_count += 1
+        else:
+            # Sequential conversion
+            for chunk_idx, episode_idx in tqdm(
+                all_conversions,
+                desc="Converting episodes",
+                unit="episode",
+            ):
+                success, cfg, error, ep_idx, ch_idx = convert_one(
+                    (chunk_idx, episode_idx)
                 )
-                fail_count += 1
+                if success:
+                    last_episode_config = cfg
+                    success_count += 1
+                else:
+                    logger.warning(
+                        f"Skipping episode {ep_idx} in chunk {ch_idx}: {error}"
+                    )
+                    fail_count += 1
+
+        # Save a single config file named after output directory
+        if last_episode_config:
+            config_name = f"config_{output_dir.name}.yaml"
+            config_path = output_dir / config_name
+            with open(config_path, "w") as config_file:
+                yaml.dump(
+                    last_episode_config.model_dump(mode="python", exclude_none=True),
+                    config_file,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
+            logger.info(f"Saved config: {config_path}")
+
+            # Also update example config in configs/
+            self._update_example_config(config_path)
 
         # Summary
         logger.info("=" * SEPARATOR_WIDTH)
@@ -173,10 +226,6 @@ class LeRobotConverter:
             logger.warning(f"Failed/Skipped: {fail_count} episodes")
         logger.info(f"Output directory: {output_dir}")
         logger.info("=" * SEPARATOR_WIDTH)
-
-        # After all conversions, update example config once (latest)
-        if last_config_path:
-            self._update_example_config(last_config_path)
 
         return success_count > 0
 
@@ -219,37 +268,37 @@ class LeRobotConverter:
             episode_idx, chunk_idx
         )
 
-        # Create episode directory: mcap_output/episode_000/
-        episode_dir = output_dir / f"episode_{episode_idx:03d}"
-        episode_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure output directory exists
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save config file: episode_000/config_000.yaml
-        # Convert Pydantic model to dict for YAML serialization
-        config_path = episode_dir / f"config_{episode_idx:03d}.yaml"
-        with open(config_path, "w") as config_file:
+        # Save config to temp file for tabular2mcap
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False
+        ) as config_file:
             yaml.dump(
                 episode_config.model_dump(mode="python", exclude_none=True),
                 config_file,
                 default_flow_style=False,
                 sort_keys=False,
             )
+            config_path = Path(config_file.name)
 
-        logger.info(f"Saved config: {config_path.relative_to(output_dir)}")
+        try:
+            # Use tabular2mcap's McapConverter
+            mcap_converter = McapConverter(config_path, self.converter_functions_path)
 
-        # Use tabular2mcap's McapConverter
-        mcap_converter = McapConverter(config_path, self.converter_functions_path)
+            # Output MCAP path: mcap_output/episode_000.mcap
+            output_mcap = output_dir / f"episode_{episode_idx:03d}.mcap"
 
-        # Output MCAP path: episode_000/episode_000.mcap
-        output_mcap = episode_dir / f"episode_{episode_idx:03d}.mcap"
+            logger.info(f"Converting episode {episode_idx} -> {output_mcap.name}")
 
-        logger.info(
-            f"Converting episode {episode_idx} -> {output_mcap.relative_to(output_dir)}"
-        )
+            # Convert
+            mcap_converter.convert(self.dataset_root, output_mcap)
+        finally:
+            # Clean up temp config file
+            config_path.unlink(missing_ok=True)
 
-        # Convert
-        mcap_converter.convert(self.dataset_root, output_mcap)
-
-        return config_path
+        return episode_config
 
     def _convert_episode_v3(self, episode_idx: int, output_dir: Path) -> Path:
         """
@@ -296,9 +345,8 @@ class LeRobotConverter:
                 "These will be skipped."
             )
 
-        # Create episode directory: mcap_output/episode_000/
-        episode_dir = output_dir / f"episode_{episode_idx:03d}"
-        episode_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure output directory exists
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         # Create temporary directory for extracted episode data
         with tempfile.TemporaryDirectory(
@@ -359,8 +407,8 @@ class LeRobotConverter:
                 self.dataset_info.video_keys
             )
 
-            # Save config file
-            config_path = episode_dir / f"config_{episode_idx:03d}.yaml"
+            # Save config to temp file for tabular2mcap
+            config_path = temp_path / "config.yaml"
             with open(config_path, "w") as config_file:
                 yaml.dump(
                     episode_config.model_dump(mode="python", exclude_none=True),
@@ -369,24 +417,19 @@ class LeRobotConverter:
                     sort_keys=False,
                 )
 
-            logger.debug(f"Saved config: {config_path}")
-
             # Use tabular2mcap's McapConverter
             mcap_converter = McapConverter(config_path, self.converter_functions_path)
 
-            # Output MCAP path: episode_000/episode_000.mcap
-            output_mcap = episode_dir / f"episode_{episode_idx:03d}.mcap"
+            # Output MCAP path: mcap_output/episode_000.mcap
+            output_mcap = output_dir / f"episode_{episode_idx:03d}.mcap"
 
-            logger.info(
-                f"Converting episode {episode_idx} -> "
-                f"{output_mcap.relative_to(output_dir)}"
-            )
+            logger.info(f"Converting episode {episode_idx} -> {output_mcap.name}")
 
             # Convert from temp directory
             # Use strip_file_suffix to drop .parquet from topic base
             mcap_converter.convert(temp_path, output_mcap, strip_file_suffix=True)
 
-            return config_path
+            return episode_config
 
     def _extract_episode_parquet(
         self,
