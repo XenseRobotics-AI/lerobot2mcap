@@ -181,10 +181,10 @@ lerobot2mcap convert /path/to/dataset -o ./mcap_output -f ./my_converter_functio
 **Performance (50 episodes, 16-core CPU):**
 
 | Workers | Time | Speedup |
-|---------|------|---------|
-| 1 | 77s | 1.0x |
-| 4 | 48s | 1.6x |
-| 8 | 45s | 1.7x |
+| ------- | ---- | ------- |
+| 1       | 77s  | 1.0x    |
+| 4       | 48s  | 1.6x    |
+| 8       | 45s  | 1.7x    |
 
 **What Happens During Conversion (v3.0-first):**
 
