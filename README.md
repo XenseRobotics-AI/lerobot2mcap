@@ -14,6 +14,7 @@ Convert LeRobot datasets to MCAP format with automatic configuration generation 
 - **Cross-compatible**: Still supports LeRobot v2.0, v2.1 (per-episode files)
 - **AV1-ready**: PyAV monkey-patch replaces OpenCV video loader for AV1/H.264/etc.
 - **Metadata-driven**: Reads FPS, video codecs, writer format, and chunk size from dataset metadata
+- **Parallel conversion**: Multi-threaded episode conversion with `-j` flag (default: 1/4 of CPU cores)
 
 ## Installation
 
@@ -119,10 +120,10 @@ The tool provides two main commands: `download` and `convert`.
 
 ```bash
 # Download and convert in one command (downloads from Hugging Face)
-uv run lerobot2mcap download lerobot/pusht -o ./data
+lerobot2mcap download lerobot/pusht -o ./data
 
 # Or convert an existing dataset
-uv run lerobot2mcap convert ~/.cache/huggingface/lerobot/pusht -o ./mcap_output
+lerobot2mcap convert ~/.cache/huggingface/lerobot/pusht -o ./mcap_output
 ```
 
 ### Command: `download`
@@ -162,6 +163,9 @@ lerobot2mcap convert ~/.cache/huggingface/lerobot/pusht -o ./mcap_output
 # Convert specific episodes only
 lerobot2mcap convert /path/to/dataset -o ./mcap_output -e 0 1 2
 
+# Parallel conversion with 8 workers
+lerobot2mcap convert /path/to/dataset -o ./mcap_output -j8
+
 # Custom converter functions (advanced)
 lerobot2mcap convert /path/to/dataset -o ./mcap_output -f ./my_converter_functions.yaml
 ```
@@ -171,22 +175,33 @@ lerobot2mcap convert /path/to/dataset -o ./mcap_output -f ./my_converter_functio
 - `input_dir`: Path to LeRobot dataset root (must contain `meta/info.json`)
 - `-o, --output-dir`: Output directory for MCAP files (default: `<input_dir>/mcap_conversion`)
 - `-e, --episodes`: Specific episode indices to convert (default: all episodes)
+- `-j, --jobs`: Number of parallel workers (default: 1/4 of CPU cores)
 - `-f, --converter-functions`: Path to custom converter functions YAML (default: built-in `configs/converter_functions.yaml`)
+
+**Performance (50 episodes, 16-core CPU):**
+
+| Workers | Time | Speedup |
+|---------|------|---------|
+| 1 | 77s | 1.0x |
+| 4 | 48s | 1.6x |
+| 8 | 45s | 1.7x |
 
 **What Happens During Conversion (v3.0-first):**
 
 1. Reads `meta/info.json` to understand dataset structure (merged files in v3.0)
 2. Calculates total chunks (`ceil(total_episodes / chunks_size)`)—ignored for v3.0 merged files
-3. For each episode:
+3. For each episode (parallelized with `-j` workers):
    - Slices parquet rows by episode index range (v3.0)
    - Slices video by timestamps per episode (v3.0) using ffmpeg
    - Writes temp files:
      - `robot/actions.parquet` → `/robot/actions/data`
      - `robot/states.parquet` → `/robot/states/data`
      - `observation/images/{cam}.mp4` → `/observation/images/{cam}/video`
-   - Generates per-episode config (Pydantic) and calls `tabular2mcap` with `strip_file_suffix=True`
-   - Saves MCAP and per-episode config under `output/episode_xxx/`
-4. After all episodes finish, copies the last generated config to `configs/config.yaml` as the latest example
+   - Generates temp config (Pydantic) and calls `tabular2mcap` with `strip_file_suffix=True`
+   - Saves MCAP directly to output directory as `episode_XXX.mcap`
+4. After all episodes finish:
+   - Saves a single `config_{output_dir_name}.yaml` in output directory
+   - Copies config to `configs/config.yaml` as reference
 5. Skips episodes with missing files (warns in logs)
 
 ### Topic layout (v3.0 example)
@@ -297,19 +312,14 @@ dataset_root/
 
 ## Output
 
-Each episode produces a separate directory containing an MCAP file and its configuration:
+All episodes are saved directly in the output directory with a single shared configuration file:
 
 ```
 mcap_output/
-├── episode_000/
-│   ├── episode_000.mcap
-│   └── config_000.yaml
-├── episode_001/
-│   ├── episode_001.mcap
-│   └── config_001.yaml
-└── episode_002/
-    ├── episode_002.mcap
-    └── config_002.yaml
+├── config_mcap_output.yaml   # Single config file (named after output dir)
+├── episode_000.mcap
+├── episode_001.mcap
+└── episode_002.mcap
 ```
 
 Each MCAP file contains:
