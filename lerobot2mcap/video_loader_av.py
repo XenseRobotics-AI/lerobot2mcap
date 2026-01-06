@@ -4,11 +4,12 @@ Provides video slicing functionality for LeRobot v3.0 datasets
 where multiple episodes are merged into single video files.
 """
 
-import logging
 import subprocess
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from .logger import get_logger
+
+logger = get_logger("video_loader")
 
 
 def save_video_slice(

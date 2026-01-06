@@ -1,7 +1,5 @@
 """Configuration generator for tabular2mcap conversion."""
 
-import logging
-
 # from pathlib import Path
 from tabular2mcap.loader.models import (
     AttachmentConfig,
@@ -12,8 +10,9 @@ from tabular2mcap.loader.models import (
 )
 
 from .dataset_info import DEFAULT_CODEC, DatasetInfo
+from .logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("config_generator")
 
 
 class ConfigGenerator:

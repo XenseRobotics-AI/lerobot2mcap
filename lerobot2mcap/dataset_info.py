@@ -17,13 +17,14 @@ TODO: Add validate_files() Method (Low Priority)
 """
 
 import json
-import logging
 import math
 from pathlib import Path
 
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+from .logger import get_logger
+
+logger = get_logger("dataset_info")
 
 # Official LeRobot defaults (from lerobot.datasets.utils)
 DEFAULT_CHUNK_SIZE = 1000  # Max number of episodes per chunk

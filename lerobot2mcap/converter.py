@@ -1,6 +1,5 @@
 """Main converter orchestrator for LeRobot to MCAP conversion."""
 
-import logging
 import shutil
 import tempfile
 from pathlib import Path
@@ -12,8 +11,9 @@ from tqdm import tqdm
 
 from .config_generator import ConfigGenerator
 from .dataset_info import DatasetInfo
+from .logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("converter")
 
 # Display formatting constants
 SEPARATOR_WIDTH = 60

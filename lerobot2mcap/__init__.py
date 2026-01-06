@@ -1,7 +1,6 @@
 """LeRobot to MCAP converter."""
 
 import argparse
-import logging
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any, Iterable
@@ -276,13 +275,9 @@ from .converter import LeRobotConverter
 
 __version__ = version("lerobot2mcap")
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s %(asctime)s %(filename)s:%(lineno)d %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+from .logger import get_logger
+
+logger = get_logger("lerobot2mcap")
 
 # Get the package root directory
 PACKAGE_ROOT = Path(__file__).parent.parent
@@ -366,7 +361,7 @@ def convert_dataset(
         return success
 
     except Exception as e:
-        logger.exception(f"Conversion failed: {e}")
+        logger.error(f"Conversion failed: {e}")
         return False
 
 

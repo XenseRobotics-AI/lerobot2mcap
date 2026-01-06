@@ -8,6 +8,7 @@ dependencies = [
   "lerobot==0.4.1",
   "tabular2mcap[protobuf]==0.1.12",
   "av==15.1.0",
+  "spdlog>=2.0.0",
 ]
 
 [project.scripts]
