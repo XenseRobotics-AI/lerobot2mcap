@@ -289,24 +289,31 @@ PACKAGE_ROOT = Path(__file__).parent.parent
 DEFAULT_CONVERTER_FUNCTIONS = str(PACKAGE_ROOT / "configs" / "converter_functions.yaml")
 
 
-def download_dataset(
-    dataset_id: str, output_dir: Path, episodes: list[int] | None = None
-) -> bool:
-    """Download a lerobot dataset from Hugging Face Hub."""
+def download_dataset(dataset_id: str, episodes: list[int] | None = None) -> Path | None:
+    """
+    Download a lerobot dataset from Hugging Face Hub.
+
+    Downloads to default HuggingFace cache: ~/.cache/huggingface/lerobot
+
+    Returns:
+        Path to the downloaded dataset root, or None if download failed.
+    """
     logger.info(f"Downloading: {dataset_id}")
     if episodes:
         logger.info(f"  Episodes: {episodes}")
-    logger.info(f"  Output: {output_dir}")
 
     try:
-        dataset = LeRobotDataset(dataset_id, root=str(output_dir), episodes=episodes)
+        # Use default cache location (don't pass root)
+        dataset = LeRobotDataset(dataset_id, episodes=episodes)
         logger.info(
-            f"Download complete - Episodes: {dataset.num_episodes}, Frames: {dataset.num_frames}, FPS: {dataset.fps}"
+            f"Download complete - Episodes: {dataset.num_episodes}, "
+            f"Frames: {dataset.num_frames}, FPS: {dataset.fps}"
         )
-        return True
+        # Return the actual dataset root path
+        return Path(dataset.root)
     except Exception as e:
         logger.error(f"Download failed: {e}")
-        return False
+        return None
 
 
 def convert_dataset(
@@ -374,14 +381,14 @@ def main():
 
     # Define download parser arguments
     download_parser = subparsers.add_parser(
-        "download", help="Download a LeRobot dataset"
+        "download", help="Download a LeRobot dataset and convert to MCAP"
     )
     download_parser.add_argument("dataset_id", help="Dataset ID (e.g., lerobot/pusht)")
     download_parser.add_argument(
         "-o",
         "--output-dir",
         default=None,
-        help="Output directory (default: dataset_id)",
+        help="Output directory for MCAP files (default: ./{dataset_name}_mcap)",
     )
     download_parser.add_argument(
         "-e",
@@ -391,6 +398,7 @@ def main():
         help="Episode IDs to download (e.g., 0 1 2). If not specified, all episodes will be downloaded.",
     )
     import os
+
     default_workers = max(1, os.cpu_count() // 4) if os.cpu_count() else 1
     download_parser.add_argument(
         "-j",
@@ -439,17 +447,20 @@ def main():
 
     # Handle download command
     if args.command == "download":
-        download_dir = (
-            Path(args.output_dir).expanduser() if args.output_dir else Path("./data")
-        )
-
-        # Download the dataset
-        if not download_dataset(args.dataset_id, download_dir, args.episodes):
+        # Download to default HuggingFace cache (~/.cache/huggingface/lerobot)
+        dataset_root = download_dataset(args.dataset_id, args.episodes)
+        if dataset_root is None:
             return 1  # Download failed
 
-        # Set dataset root for conversion
-        dataset_root = download_dir
-        mcap_output_dir = dataset_root / "mcap_conversion"
+        logger.info(f"Dataset location: {dataset_root}")
+
+        # MCAP output directory: use -o or default to ./{dataset_name}_mcap
+        dataset_name = args.dataset_id.replace("/", "_")
+        mcap_output_dir = (
+            Path(args.output_dir).expanduser()
+            if args.output_dir
+            else Path(f"./{dataset_name}_mcap")
+        )
         converter_functions = Path(DEFAULT_CONVERTER_FUNCTIONS)
         chunks = None  # Convert all chunks
         episodes = args.episodes  # Use same episode filter as download
