@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Official LeRobot defaults (from lerobot.datasets.utils)
 DEFAULT_CHUNK_SIZE = 1000  # Max number of episodes per chunk
-DEFAULT_CODEC = "h264"  # "h264"  # Default video codec if not specified
+DEFAULT_CODEC = "h264"  # Supported: "h264", "av1"
 DEFAULT_FILE_INDEX = 0  # First file in a chunk
 
 
