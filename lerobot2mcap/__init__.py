@@ -390,6 +390,15 @@ def main():
         nargs="+",
         help="Episode IDs to download (e.g., 0 1 2). If not specified, all episodes will be downloaded.",
     )
+    import os
+    default_workers = max(1, os.cpu_count() // 4) if os.cpu_count() else 1
+    download_parser.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=default_workers,
+        help=f"Number of parallel workers for conversion (default: {default_workers}, 1/4 of CPU cores)",
+    )
 
     # Define
     convert_parser = subparsers.add_parser(
@@ -418,9 +427,6 @@ def main():
         default=DEFAULT_CONVERTER_FUNCTIONS,
         help=f"Path to converter_functions.yaml file (default: {DEFAULT_CONVERTER_FUNCTIONS})",
     )
-    import os
-
-    default_workers = max(1, os.cpu_count() // 4) if os.cpu_count() else 1
     convert_parser.add_argument(
         "-j",
         "--jobs",
@@ -447,7 +453,7 @@ def main():
         converter_functions = Path(DEFAULT_CONVERTER_FUNCTIONS)
         chunks = None  # Convert all chunks
         episodes = args.episodes  # Use same episode filter as download
-        num_workers = 1  # Default for download command
+        num_workers = args.jobs
 
     elif args.command == "convert":
         # Set parameters from convert command arguments
