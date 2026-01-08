@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pandas as pd
 import yaml
-from tabular2mcap import McapConverter
 from tqdm import tqdm
 
 from .config_generator import ConfigGenerator
 from .dataset_info import DatasetInfo
 from .logger import get_logger
+from .sorted_mcap_converter import SortedMcapConverter
 
 logger = get_logger("converter")
 
@@ -282,8 +282,10 @@ class LeRobotConverter:
             config_path = Path(config_file.name)
 
         try:
-            # Use tabular2mcap's McapConverter
-            mcap_converter = McapConverter(config_path, self.converter_functions_path)
+            # Use SortedMcapConverter for timestamp-ordered MCAP output
+            mcap_converter = SortedMcapConverter(
+                config_path, self.converter_functions_path
+            )
 
             # Output MCAP path: mcap_output/episode_000.mcap
             output_mcap = output_dir / f"episode_{episode_idx:03d}.mcap"
@@ -415,8 +417,10 @@ class LeRobotConverter:
                     sort_keys=False,
                 )
 
-            # Use tabular2mcap's McapConverter
-            mcap_converter = McapConverter(config_path, self.converter_functions_path)
+            # Use SortedMcapConverter for timestamp-ordered MCAP output
+            mcap_converter = SortedMcapConverter(
+                config_path, self.converter_functions_path
+            )
 
             # Output MCAP path: mcap_output/episode_000.mcap
             output_mcap = output_dir / f"episode_{episode_idx:03d}.mcap"

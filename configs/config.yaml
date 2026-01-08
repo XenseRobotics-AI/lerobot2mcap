@@ -1,4 +1,4 @@
-writer_format: json
+writer_format: ros2
 tabular_mappings:
 - file_pattern: robot/actions.parquet
   converter_functions:
