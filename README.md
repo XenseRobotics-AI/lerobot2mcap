@@ -14,31 +14,20 @@ Convert LeRobot datasets to MCAP format with automatic configuration generation 
 - **Cross-compatible**: Still supports LeRobot v2.0, v2.1 (per-episode files)
 - **AV1-ready**: PyAV monkey-patch replaces OpenCV video loader for AV1/H.264/etc.
 - **Metadata-driven**: Reads FPS, video codecs, writer format, and chunk size from dataset metadata
-- **Parallel conversion**: Multi-threaded episode conversion with `-j` flag (default: 1/4 of CPU cores)
+- **Parallel conversion**: Multi-threaded episode conversion with `-j` flag (default: min(8, cpu_count // 2))
 
 ## Installation
-
-### Using uv (Recommended)
 
 ```bash
 # Clone the repository
 git clone https://github.com/Vertax42/lerobot2mcap.git
 cd lerobot2mcap
 
-# Install dependencies
-uv sync
+# Install in editable mode
+pip install -e .
 
 # Open help menu
-uv run lerobot2mcap --help
-```
-
-### Using pip
-
-```bash
-# Clone and install
-git clone https://github.com/Vertax42/lerobot2mcap.git
-cd lerobot2mcap
-pip install -e .
+lerobot2mcap --help
 ```
 
 ## Requirements
@@ -149,7 +138,7 @@ lerobot2mcap download lerobot/pusht -j8
 - `dataset_id`: Hugging Face dataset ID (e.g., `lerobot/pusht`)
 - `-o, --output-dir`: Output directory for MCAP files (default: `./{dataset_name}_mcap`)
 - `-e, --episodes`: Specific episode indices to download (default: all episodes)
-- `-j, --jobs`: Number of parallel workers (default: 1/4 of CPU cores)
+- `-j, --jobs`: Number of parallel workers (default: min(8, cpu_count // 2))
 
 **Output:**
 
@@ -179,7 +168,7 @@ lerobot2mcap convert /path/to/dataset -o ./mcap_output -f ./my_converter_functio
 - `input_dir`: Path to LeRobot dataset root (must contain `meta/info.json`)
 - `-o, --output-dir`: Output directory for MCAP files (default: `<input_dir>/mcap_conversion`)
 - `-e, --episodes`: Specific episode indices to convert (default: all episodes)
-- `-j, --jobs`: Number of parallel workers (default: 1/4 of CPU cores)
+- `-j, --jobs`: Number of parallel workers (default: min(8, cpu_count // 2))
 - `-f, --converter-functions`: Path to custom converter functions YAML (default: built-in `configs/converter_functions.yaml`)
 
 **Performance (50 episodes, 16-core CPU):**
@@ -381,14 +370,14 @@ Lerobot dataset v3.0 file splitting into individual episodes is yet to be added 
 ## Development
 
 ```bash
-# Install dependencies
-uv sync
+# Install in editable mode with dev dependencies
+pip install -e .
 
 # Run tests
-uv run pytest
+python -m pytest
 
 # Build package
-uv build
+python -m build
 ```
 
 ## Browse Datasets

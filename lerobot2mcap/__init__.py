@@ -5,7 +5,6 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Any, Iterable
 
-import cv2
 import numpy as np
 
 # Fix tabular2mcap bugs
@@ -41,9 +40,9 @@ def _fixed_compressed_video_message_iterator(
     Fixed version using ffmpeg to encode video with every frame as keyframe.
     Supports H.264 and AV1 formats. Each frame can be decoded independently.
     """
+    import os
     import subprocess
     import tempfile
-    import os
 
     height, width = video_frames[0].shape[:2]
 
@@ -84,22 +83,23 @@ def _fixed_compressed_video_message_iterator(
     config = codec_configs[format]
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Write frames as raw video
-        raw_video = os.path.join(tmpdir, "raw.avi")
-        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-        writer = cv2.VideoWriter(raw_video, fourcc, int(fps), (width, height))
-        for frame in video_frames:
-            writer.write(frame)
-        writer.release()
-
-        # Encode with ffmpeg: every frame is keyframe
+        # Pipe raw BGR frames straight to ffmpeg — avoids the MJPG round-trip
+        # (encode to JPEG, write AVI, ffmpeg re-decode JPEG) that dominated runtime.
         encoded_file = os.path.join(tmpdir, f"encoded.{config['ext']}")
         cmd = (
             [
                 "ffmpeg",
                 "-y",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "bgr24",  # cv2/numpy frames are BGR
+                "-s",
+                f"{width}x{height}",
+                "-r",
+                str(int(fps)),
                 "-i",
-                raw_video,
+                "pipe:0",
                 "-c:v",
                 config["encoder"],
                 "-pix_fmt",
@@ -118,7 +118,33 @@ def _fixed_compressed_video_message_iterator(
                 encoded_file,
             ]
         )
-        subprocess.run(cmd, check=True, capture_output=True)
+        proc = subprocess.Popen(
+            cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        try:
+            for frame in video_frames:
+                if not frame.flags["C_CONTIGUOUS"]:
+                    frame = np.ascontiguousarray(frame)
+                proc.stdin.write(frame.tobytes())
+            proc.stdin.close()
+            stderr_data = proc.stderr.read()
+            ret = proc.wait()
+            if ret != 0:
+                raise RuntimeError(
+                    f"ffmpeg encode failed (code {ret}): "
+                    f"{stderr_data.decode(errors='replace')}"
+                )
+        except BrokenPipeError:
+            stderr_data = proc.stderr.read()
+            ret = proc.wait()
+            raise RuntimeError(
+                f"ffmpeg stdin pipe broke (code {ret}): "
+                f"{stderr_data.decode(errors='replace')}"
+            )
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
 
         # Read encoded bitstream
         with open(encoded_file, "rb") as f:
@@ -394,13 +420,14 @@ def main():
     )
     import os
 
-    default_workers = max(1, os.cpu_count() // 4) if os.cpu_count() else 1
+    default_workers = min(8, (os.cpu_count() or 2) // 2)
+    default_workers = max(1, default_workers)
     download_parser.add_argument(
         "-j",
         "--jobs",
         type=int,
         default=default_workers,
-        help=f"Number of parallel workers for conversion (default: {default_workers}, 1/4 of CPU cores)",
+        help=f"Number of parallel workers for conversion (default: {default_workers})",
     )
 
     # Define
@@ -435,7 +462,7 @@ def main():
         "--jobs",
         type=int,
         default=default_workers,
-        help=f"Number of parallel workers for conversion (default: {default_workers}, 1/4 of CPU cores)",
+        help=f"Number of parallel workers for conversion (default: {default_workers})",
     )
 
     args = parser.parse_args()

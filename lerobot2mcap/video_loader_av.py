@@ -34,25 +34,37 @@ def save_video_slice(
     # Calculate duration
     duration = to_timestamp - from_timestamp
 
+    # libx264/libx265 support presets; use ultrafast to keep slicing cheap.
+    preset_args = (
+        ["-preset", "ultrafast"]
+        if codec.startswith("libx") or codec == "libsvtav1"
+        else []
+    )
+
     # Use ffmpeg command line for reliable video slicing
-    cmd = [
-        "ffmpeg",
-        "-y",  # Overwrite output file
-        "-ss",
-        str(from_timestamp),  # Start time (before -i for fast seek)
-        "-i",
-        str(source_path),  # Input file
-        "-t",
-        str(duration),  # Duration
-        "-c:v",
-        codec,  # Video codec
-        "-pix_fmt",
-        "yuv420p",  # Pixel format
-        "-an",  # No audio
-        "-loglevel",
-        "error",  # Reduce verbosity
-        str(output_path),  # Output file
-    ]
+    cmd = (
+        [
+            "ffmpeg",
+            "-y",  # Overwrite output file
+            "-ss",
+            str(from_timestamp),  # Start time (before -i for fast seek)
+            "-i",
+            str(source_path),  # Input file
+            "-t",
+            str(duration),  # Duration
+            "-c:v",
+            codec,  # Video codec
+        ]
+        + preset_args
+        + [
+            "-pix_fmt",
+            "yuv420p",  # Pixel format
+            "-an",  # No audio
+            "-loglevel",
+            "error",  # Reduce verbosity
+            str(output_path),  # Output file
+        ]
+    )
 
     logger.debug(f"Running ffmpeg: {' '.join(cmd)}")
 
