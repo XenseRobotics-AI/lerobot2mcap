@@ -12,6 +12,11 @@ import tabular2mcap.converter.others
 import tabular2mcap.mcap_converter
 from tabular2mcap.converter.common import ConvertedRow
 
+# Encoder knobs for the all-keyframe video pass. Mutated by main() based on
+# CLI args, then read inside _fixed_compressed_video_message_iterator.
+VIDEO_ENCODER_PRESET = "veryfast"
+VIDEO_ENCODER_CRF = 30  # aligned with lerobot-record default
+
 
 def _fixed_create_foxglove_compressed_image_data(
     frame_timestamp: float, frame_id: str, encoded_data: bytes, format: str
@@ -53,7 +58,9 @@ def _fixed_compressed_video_message_iterator(
             "ext": "h264",
             "extra_args": [
                 "-preset",
-                "ultrafast",
+                VIDEO_ENCODER_PRESET,
+                "-crf",
+                str(VIDEO_ENCODER_CRF),
                 "-tune",
                 "zerolatency",
                 "-bf",
@@ -391,6 +398,46 @@ def convert_dataset(
         return False
 
 
+_LIBX264_PRESETS = (
+    "ultrafast",
+    "superfast",
+    "veryfast",
+    "faster",
+    "fast",
+    "medium",
+    "slow",
+    "slower",
+    "veryslow",
+    "placebo",
+)
+
+
+def _add_video_encoder_args(p: argparse.ArgumentParser) -> None:
+    """Attach --video-preset and --video-crf to a subparser.
+
+    These tune the per-frame all-keyframe re-encode. Defaults are chosen for a
+    good size/quality trade-off on robotics video (see tests/bench_encoder.sh).
+    """
+    p.add_argument(
+        "--video-preset",
+        choices=_LIBX264_PRESETS,
+        default=VIDEO_ENCODER_PRESET,
+        help=(
+            f"libx264 preset for the per-frame keyframe encode "
+            f"(default: {VIDEO_ENCODER_PRESET}). Faster presets produce larger files."
+        ),
+    )
+    p.add_argument(
+        "--video-crf",
+        type=int,
+        default=VIDEO_ENCODER_CRF,
+        help=(
+            f"libx264 CRF quality (0-51, lower = better, default: {VIDEO_ENCODER_CRF}). "
+            f"Robotics video tolerates 28-32 with no visible loss."
+        ),
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="lerobot2mcap", description="Convert LeRobot datasets to MCAP format"
@@ -429,6 +476,7 @@ def main():
         default=default_workers,
         help=f"Number of parallel workers for conversion (default: {default_workers})",
     )
+    _add_video_encoder_args(download_parser)
 
     # Define
     convert_parser = subparsers.add_parser(
@@ -464,8 +512,20 @@ def main():
         default=default_workers,
         help=f"Number of parallel workers for conversion (default: {default_workers})",
     )
+    _add_video_encoder_args(convert_parser)
 
     args = parser.parse_args()
+
+    # Apply video encoder overrides (mutates module-level config read by the
+    # monkey-patched compressed_video iterator).
+    preset = getattr(args, "video_preset", None)
+    if preset is not None:
+        global VIDEO_ENCODER_PRESET
+        VIDEO_ENCODER_PRESET = preset
+    crf = getattr(args, "video_crf", None)
+    if crf is not None:
+        global VIDEO_ENCODER_CRF
+        VIDEO_ENCODER_CRF = crf
 
     # Handle download command
     if args.command == "download":
