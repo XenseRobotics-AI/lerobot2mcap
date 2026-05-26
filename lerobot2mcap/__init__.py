@@ -14,8 +14,8 @@ from tabular2mcap.converter.common import ConvertedRow
 
 # Encoder knobs for the all-keyframe video pass. Mutated by main() based on
 # CLI args, then read inside _fixed_compressed_video_message_iterator.
-VIDEO_ENCODER_PRESET = "veryfast"
-VIDEO_ENCODER_CRF = 30  # aligned with lerobot-record default
+VIDEO_ENCODER_PRESET = "ultrafast"
+VIDEO_ENCODER_CRF = 23  # libx264 default; visually lossless for robotics
 
 
 def _fixed_create_foxglove_compressed_image_data(
