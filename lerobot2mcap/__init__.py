@@ -181,40 +181,74 @@ def _fixed_compressed_video_message_iterator(
             frame_timestamp += frame_timestamp_step
 
 
+def h264_message_iterator(
+    h264_path: Path,
+    fps: float,
+    frame_id: str,
+    format: str = "h264",
+) -> Iterable[ConvertedRow]:
+    """Yield one ConvertedRow per frame from a pre-encoded all-keyframe .h264 file.
+
+    Used in the v3 fast path: the slice + reencode was already done by ffmpeg in
+    ``save_video_slice_h264``, so here we only have to read the bitstream and
+    split it on SPS boundaries — no decode, no second encode, no GIL-bound
+    Python feeding loop.
+    """
+    with open(h264_path, "rb") as f:
+        bitstream = f.read()
+    frames_data = _split_h264_frames(bitstream)
+
+    frame_timestamp: float = 0.0
+    frame_timestamp_step = 1.0 / fps
+    for frame_data in frames_data:
+        yield ConvertedRow(
+            data=_fixed_create_foxglove_compressed_image_data(
+                frame_timestamp=frame_timestamp,
+                frame_id=frame_id,
+                encoded_data=frame_data,
+                format=format,
+            ),
+            log_time_ns=int(frame_timestamp * 1_000_000_000),
+            publish_time_ns=int(frame_timestamp * 1_000_000_000),
+        )
+        frame_timestamp += frame_timestamp_step
+
+
 def _split_h264_frames(bitstream: bytes) -> list[bytes]:
-    """Split H.264 Annex B bitstream into frames. Each frame starts with SPS."""
-    frames_data = []
+    """Split H.264 Annex B bitstream into frames. Each frame starts with SPS.
 
-    # Find all start code positions
-    start_positions = []
+    Uses ``bytes.find`` (C-implemented) instead of a per-byte Python scan, so
+    splitting a ~10 MB bitstream drops from ~10 s to well under a second.
+    """
+    frames_data: list[bytes] = []
+    n = len(bitstream)
+
+    # Walk all 00 00 01 start-code positions. The 4-byte variant 00 00 00 01
+    # is just a 3-byte start code with a leading 00, so this catches both.
+    start_positions: list[int] = []
     i = 0
-    while i < len(bitstream) - 4:
-        if bitstream[i : i + 4] == b"\x00\x00\x00\x01":
-            start_positions.append(i)
-            i += 4
-        elif bitstream[i : i + 3] == b"\x00\x00\x01":
-            start_positions.append(i)
-            i += 3
-        else:
-            i += 1
+    while True:
+        pos = bitstream.find(b"\x00\x00\x01", i)
+        if pos < 0:
+            break
+        start_positions.append(pos)
+        i = pos + 3
 
-    # Group NAL units into frames (each frame starts with SPS, NAL type 7)
-    current_frame_start = None
+    # Group NAL units into frames (each frame begins at an SPS, NAL type 7).
+    current_frame_start: int | None = None
     for pos in start_positions:
-        # Get NAL type
-        if bitstream[pos : pos + 4] == b"\x00\x00\x00\x01":
-            nal_type = bitstream[pos + 4] & 0x1F
-        else:
-            nal_type = bitstream[pos + 3] & 0x1F
+        nal_header = bitstream[pos + 3]  # byte right after 00 00 01
+        if (nal_header & 0x1F) != 7:
+            continue
+        # New SPS — current frame ends here. For the 4-byte variant 00 00 00 01,
+        # back up one byte so the leading 00 belongs to this frame's start code.
+        frame_start = pos - 1 if pos > 0 and bitstream[pos - 1] == 0 else pos
+        if current_frame_start is not None:
+            frames_data.append(bitstream[current_frame_start:frame_start])
+        current_frame_start = frame_start
 
-        if nal_type == 7:  # SPS - new frame starts
-            if current_frame_start is not None:
-                frames_data.append(bitstream[current_frame_start:pos])
-            current_frame_start = pos
-
-    # Don't forget the last frame
     if current_frame_start is not None:
-        frames_data.append(bitstream[current_frame_start:])
+        frames_data.append(bitstream[current_frame_start:n])
 
     return frames_data
 
@@ -350,19 +384,19 @@ def convert_dataset(
     converter_functions_path: Path,
     chunks: list[int] | None = None,
     episodes: list[int] | None = None,
-    num_workers: int = 1,
+    intra_workers: int = 8,
 ) -> bool:
     """
     Convert a LeRobot dataset to MCAP format.
-    Iterates through each chunk and converts all episodes within that chunk.
-    Each episode produces a separate MCAP file in its own directory.
+    Episodes are processed serially; intra_workers controls how many cameras
+    inside one episode are sliced + encoded concurrently.
 
     Args:
         dataset_root: Root directory of the LeRobot dataset
         output_dir: Output directory for MCAP files
         converter_functions_path: Path to converter_functions.yaml
         episodes: List of episode indices to convert (None = all episodes)
-        num_workers: Number of parallel workers (default: 1)
+        intra_workers: Per-episode internal parallelism (default: 8)
     Returns:
         True if conversion succeeded, False otherwise
     """
@@ -371,13 +405,14 @@ def convert_dataset(
         logger.info(f"  Episodes: {episodes}")
     logger.info(f"  Output: {output_dir}")
     logger.info(f"  Converter functions: {converter_functions_path}")
-    if num_workers > 1:
-        logger.info(f"  Workers: {num_workers}")
+    logger.info(f"  Intra-episode workers: {intra_workers}")
 
     try:
         # Initialize the converter
         converter = LeRobotConverter(
-            dataset_root=dataset_root, converter_functions_path=converter_functions_path
+            dataset_root=dataset_root,
+            converter_functions_path=converter_functions_path,
+            intra_workers=intra_workers,
         )
 
         # Show conversion plan
@@ -388,7 +423,6 @@ def convert_dataset(
             output_dir=output_dir,
             chunks=chunks,
             episodes=episodes,
-            num_workers=num_workers,
         )
 
         return success
@@ -474,7 +508,11 @@ def main():
         "--jobs",
         type=int,
         default=default_workers,
-        help=f"Number of parallel workers for conversion (default: {default_workers})",
+        help=(
+            f"Per-episode intra-parallelism (default: {default_workers}). "
+            f"Episodes themselves run sequentially; within each episode this many "
+            f"camera slice+encode jobs run concurrently."
+        ),
     )
     _add_video_encoder_args(download_parser)
 
@@ -510,7 +548,11 @@ def main():
         "--jobs",
         type=int,
         default=default_workers,
-        help=f"Number of parallel workers for conversion (default: {default_workers})",
+        help=(
+            f"Per-episode intra-parallelism (default: {default_workers}). "
+            f"Episodes themselves run sequentially; within each episode this many "
+            f"camera slice+encode jobs run concurrently."
+        ),
     )
     _add_video_encoder_args(convert_parser)
 
@@ -546,7 +588,7 @@ def main():
         converter_functions = Path(DEFAULT_CONVERTER_FUNCTIONS)
         chunks = None  # Convert all chunks
         episodes = args.episodes  # Use same episode filter as download
-        num_workers = args.jobs
+        intra_workers = args.jobs
 
     elif args.command == "convert":
         # Set parameters from convert command arguments
@@ -559,7 +601,7 @@ def main():
         converter_functions = Path(args.converter_functions).expanduser()
         chunks = None  # Convert all chunks
         episodes = args.episodes
-        num_workers = args.jobs
+        intra_workers = args.jobs
 
     else:
         # No command provided
@@ -573,7 +615,7 @@ def main():
         converter_functions,
         chunks,
         episodes,
-        num_workers,
+        intra_workers,
     ):
         return 0
     else:

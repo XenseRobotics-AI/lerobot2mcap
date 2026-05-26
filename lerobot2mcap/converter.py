@@ -25,15 +25,24 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 class LeRobotConverter:
     """Main converter orchestrator that manages the conversion process."""
 
-    def __init__(self, dataset_root: Path, converter_functions_path: Path):
+    def __init__(
+        self,
+        dataset_root: Path,
+        converter_functions_path: Path,
+        intra_workers: int = 8,
+    ):
         """
         Initialize LeRobotConverter.
         Args:
             dataset_root: Root directory of the LeRobot dataset
             converter_functions_path: Path to converter_functions.yaml
+            intra_workers: Number of threads to parallelise the per-camera work
+                inside a single episode (slice + re-encode). Episodes themselves
+                are processed sequentially.
         """
         self.dataset_root = dataset_root
         self.converter_functions_path = converter_functions_path
+        self.intra_workers = max(1, intra_workers)
 
         info_json_path = dataset_root / "meta" / "info.json"
         if not info_json_path.exists():
@@ -81,18 +90,16 @@ class LeRobotConverter:
         output_dir: Path,
         chunks: list[int] | None = None,
         episodes: list[int] | None = None,
-        num_workers: int = 1,
     ) -> bool:
         """
         Convert the LeRobot dataset to MCAP format.
-        Iterates through each chunk and converts all episodes within that chunk.
-        Each episode produces a separate MCAP file in its own directory.
+        Episodes are processed serially; per-episode parallelism (slice + encode
+        across cameras) is controlled by self.intra_workers.
 
         Args:
             output_dir: Directory where MCAP files will be saved
             chunks: List of chunk indices to convert (None = all chunks)
             episodes: List of episode indices to convert (None = all episodes)
-            num_workers: Number of parallel workers (default: 1)
         Returns:
             True if conversion succeeded, False otherwise
         """
@@ -147,57 +154,27 @@ class LeRobotConverter:
         fail_count = 0
         last_episode_config = None
 
-        def convert_one(args):
-            """Convert a single episode. Returns (success, config, error)."""
-            chunk_idx, episode_idx = args
+        # Episodes are processed serially: per-episode work itself is already
+        # parallelised across cameras via self.intra_workers, so running episodes
+        # in parallel just causes disk + memory contention without throughput
+        # gain.
+        for chunk_idx, episode_idx in tqdm(
+            all_conversions,
+            desc=f"Converting episodes (intra={self.intra_workers})",
+            unit="episode",
+        ):
             try:
                 if is_v3:
                     cfg = self._convert_episode_v3(episode_idx, output_dir)
                 else:
                     cfg = self._convert_episode(episode_idx, chunk_idx, output_dir)
-                return (True, cfg, None, episode_idx, chunk_idx)
+                last_episode_config = cfg
+                success_count += 1
             except Exception as e:
-                return (False, None, str(e), episode_idx, chunk_idx)
-
-        if num_workers > 1:
-            # Parallel conversion using ThreadPoolExecutor
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-
-            with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                futures = {
-                    executor.submit(convert_one, args): args for args in all_conversions
-                }
-                for future in tqdm(
-                    as_completed(futures),
-                    total=len(all_conversions),
-                    desc=f"Converting episodes ({num_workers} workers)",
-                    unit="episode",
-                ):
-                    success, cfg, error, episode_idx, chunk_idx = future.result()
-                    if success:
-                        last_episode_config = cfg
-                        success_count += 1
-                    else:
-                        logger.warn(
-                            f"Skipping episode {episode_idx} in chunk {chunk_idx}: {error}"
-                        )
-                        fail_count += 1
-        else:
-            # Sequential conversion
-            for chunk_idx, episode_idx in tqdm(
-                all_conversions,
-                desc="Converting episodes",
-                unit="episode",
-            ):
-                success, cfg, error, ep_idx, ch_idx = convert_one(
-                    (chunk_idx, episode_idx)
+                logger.warn(
+                    f"Skipping episode {episode_idx} in chunk {chunk_idx}: {e}"
                 )
-                if success:
-                    last_episode_config = cfg
-                    success_count += 1
-                else:
-                    logger.warn(f"Skipping episode {ep_idx} in chunk {ch_idx}: {error}")
-                    fail_count += 1
+                fail_count += 1
 
         # Save a single config file named after output directory
         if last_episode_config:
@@ -317,7 +294,8 @@ class LeRobotConverter:
         Raises:
             Exception: If episode conversion fails
         """
-        from .video_loader_av import save_video_slice
+        from . import VIDEO_ENCODER_CRF, VIDEO_ENCODER_PRESET
+        from .video_loader_av import save_video_slice_h264
 
         # Get episode info from metadata
         ep_info = self.dataset_info.get_episode_info(episode_idx)
@@ -371,31 +349,49 @@ class LeRobotConverter:
             # This creates topic: /observation/images/{camera}
             video_ranges = episode_files.get("video_ranges", {})
 
+            # Parallel slice extraction: each camera is an independent ffmpeg
+            # subprocess reading a different source file, so threading is a clean
+            # I/O + CPU parallelism win.
+            slice_jobs = []
             for video_key, video_path in episode_files["videos"].items():
-                if video_path.exists() and video_key in video_ranges:
-                    # Convert video_key to path structure
-                    # e.g., "observation.images.wrist_cam" -> "observation/images/wrist_cam.mp4"
-                    video_rel_path = video_key.replace(".", "/") + ".mp4"
-                    temp_video_path = temp_path / video_rel_path
-                    temp_video_path.parent.mkdir(parents=True, exist_ok=True)
-
-                    # Get timestamp range for this episode
-                    video_range = video_ranges[video_key]
-                    from_ts = video_range["from_timestamp"]
-                    to_ts = video_range["to_timestamp"]
-
-                    # Extract video slice
-                    logger.debug(
-                        f"Extracting video slice for {video_key}: "
-                        f"{from_ts:.3f}s - {to_ts:.3f}s"
-                    )
-                    save_video_slice(
+                if not (video_path.exists() and video_key in video_ranges):
+                    continue
+                video_rel_path = video_key.replace(".", "/") + ".h264"
+                temp_video_path = temp_path / video_rel_path
+                temp_video_path.parent.mkdir(parents=True, exist_ok=True)
+                video_range = video_ranges[video_key]
+                slice_jobs.append(
+                    (
+                        video_key,
                         video_path,
                         temp_video_path,
-                        from_ts,
-                        to_ts,
-                        codec="libx264",
+                        video_range["from_timestamp"],
+                        video_range["to_timestamp"],
                     )
+                )
+
+            def _slice_one(job):
+                vkey, src, dst, from_ts, to_ts = job
+                logger.debug(
+                    f"Extracting video slice for {vkey}: "
+                    f"{from_ts:.3f}s - {to_ts:.3f}s"
+                )
+                save_video_slice_h264(
+                    src,
+                    dst,
+                    from_ts,
+                    to_ts,
+                    preset=VIDEO_ENCODER_PRESET,
+                    crf=VIDEO_ENCODER_CRF,
+                )
+                return vkey
+
+            if slice_jobs:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(
+                    max_workers=min(len(slice_jobs), self.intra_workers)
+                ) as ex:
+                    list(ex.map(_slice_one, slice_jobs))
 
             # Copy log file if exists
             if self.log_file:
@@ -421,6 +417,9 @@ class LeRobotConverter:
             mcap_converter = SortedMcapConverter(
                 config_path, self.converter_functions_path
             )
+            # Side-channel: tell the converter the dataset's native fps so the
+            # .h264 fast path can stamp timestamps without re-probing.
+            mcap_converter.video_fps = self.dataset_info.get_fps()
 
             # Output MCAP path: mcap_output/episode_000.mcap
             output_mcap = output_dir / f"episode_{episode_idx:03d}.mcap"

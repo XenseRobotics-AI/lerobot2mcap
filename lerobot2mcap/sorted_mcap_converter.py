@@ -24,6 +24,11 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
+# Module-level fps fallback for the v3 pre-encoded .h264 path. The converter
+# sets it via `mcap_converter.video_fps = self.dataset_info.get_fps()` before
+# calling `convert()`. Falls back to 30 if not set.
+DEFAULT_H264_FPS = 30.0
+
 
 class SortedMcapConverter(McapConverter):
     """
@@ -252,21 +257,35 @@ class SortedMcapConverter(McapConverter):
                     schema_id = self._converter.register_schema(schema_name=schema_name)
                     self._schema_ids[schema_name] = schema_id
 
-                # Load video data
-                video_frames, video_properties = load_video_data(input_file)
-                logger.debug(
-                    f"Loaded video: {input_file.name}, {len(video_frames)} frames"
-                )
+                # Fast path: v3 pipeline pre-encoded each episode video as an
+                # all-keyframe .h264 Annex-B bitstream. No decode or second
+                # ffmpeg pass needed — just read bytes and split on SPS.
+                if input_file.suffix == ".h264":
+                    from . import h264_message_iterator
 
-                # Generate frame messages
-                frame_iterator = compressed_video_message_iterator(
-                    video_frames=video_frames,
-                    fps=video_properties["fps"],
-                    format=other_mapping.format,
-                    frame_id=other_mapping.frame_id,
-                    use_foxglove_format=schema_name.startswith("foxglove"),
-                    writer_format=self.mcap_config.writer_format,
-                )
+                    fps = getattr(self, "video_fps", None) or DEFAULT_H264_FPS
+                    frame_iterator = h264_message_iterator(
+                        h264_path=input_file,
+                        fps=fps,
+                        frame_id=other_mapping.frame_id,
+                        format=other_mapping.format,
+                    )
+                else:
+                    # Legacy path (v2 datasets, .mp4 in place): decode all
+                    # frames with cv2, then re-encode via the monkey-patched
+                    # iterator.
+                    video_frames, video_properties = load_video_data(input_file)
+                    logger.debug(
+                        f"Loaded video: {input_file.name}, {len(video_frames)} frames"
+                    )
+                    frame_iterator = compressed_video_message_iterator(
+                        video_frames=video_frames,
+                        fps=video_properties["fps"],
+                        format=other_mapping.format,
+                        frame_id=other_mapping.frame_id,
+                        use_foxglove_format=schema_name.startswith("foxglove"),
+                        writer_format=self.mcap_config.writer_format,
+                    )
 
                 # Collect messages
                 for converted in frame_iterator:

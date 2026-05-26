@@ -253,19 +253,18 @@ class ConfigGenerator:
             ),
         ]
 
-        # Video mappings: observation/images/{camera}.mp4 -> /observation/images/{camera}/video
+        # Video mappings: observation/images/{camera}.h264 -> /observation/images/{camera}/video
+        # We pre-slice + re-encode to all-keyframe .h264 bitstreams so the
+        # downstream collector can just read bytes and split on SPS boundaries
+        # (no decode, no second ffmpeg pass).
         other_mappings = []
         for video_key in video_keys:
-            # Convert video_key to path: "observation.images.wrist_cam" -> "observation/images/wrist_cam"
             video_path = video_key.replace(".", "/")
-
-            # Get frame_id
             frame_id = self.dataset_info.get_video_frame_id(video_key)
-
             other_mappings.append(
                 CompressedVideoMappingConfig(
-                    file_pattern=f"{video_path}.mp4",
-                    topic_suffix="video",  # /observation/images/wrist_cam/video
+                    file_pattern=f"{video_path}.h264",
+                    topic_suffix="video",
                     frame_id=frame_id,
                     format=DEFAULT_CODEC,
                 )
