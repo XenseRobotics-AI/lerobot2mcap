@@ -1,7 +1,7 @@
 [project]
 name = "lerobot2mcap"
 version = "0.1.0"
-description = "Add your description here"
+description = "Convert LeRobot datasets to MCAP format with automatic configuration generation from dataset metadata"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -10,6 +10,11 @@ dependencies = [
   "av==15.1.0",
   "spdlog>=2.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/XenseRobotics-AI/lerobot2mcap"
+Repository = "https://github.com/XenseRobotics-AI/lerobot2mcap"
+Issues = "https://github.com/XenseRobotics-AI/lerobot2mcap/issues"
 
 [project.scripts]
 lerobot2mcap = "lerobot2mcap:main"

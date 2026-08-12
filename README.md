@@ -20,7 +20,7 @@ Convert LeRobot datasets to MCAP format with automatic configuration generation 
 
 ```bash
 # Clone the repository
-git clone https://github.com/Vertax42/lerobot2mcap.git
+git clone https://github.com/XenseRobotics-AI/lerobot2mcap.git
 cd lerobot2mcap
 
 # Install in editable mode
