@@ -1,0 +1,39 @@
+name: CI
+
+# No `paths:` filter on purpose: `lint` is a required status check on main, and a
+# path-filtered workflow reports nothing on PRs that miss the filter — such a PR
+# would sit at "pending" forever and never become mergeable.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The project's own dependencies are deliberately NOT installed: pyproject
+      # pins lerobot==0.4.1, which drags in a full torch stack for a job that only
+      # needs to parse the source. The checks below are import-free.
+      - name: Install tools
+        run: pip install --upgrade pip ruff
+
+      # Fatal errors only — syntax errors and undefined names. This repo has never
+      # been linted, so a full rule set would fail on pre-existing style. Widen the
+      # selection once the backlog is cleared.
+      - name: Lint
+        run: ruff check --select E9,F63,F7,F82 .
+
+      - name: Syntax check
+        run: python -m compileall -q lerobot2mcap tests
+
+      # Note: tests/ holds a standalone MCAP validator and an encoder benchmark,
+      # both of which need a real dataset on disk — there is no unit-test suite to
+      # run here yet. Add a `pytest` step when one exists.
