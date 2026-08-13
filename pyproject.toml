@@ -1,29 +1,27 @@
 [project]
-name = "lerobot2mcap"
+name = "lerobot2zarr"
 version = "0.1.0"
-description = "Convert LeRobot datasets to MCAP format with automatic configuration generation from dataset metadata"
+description = "Convert LeRobot datasets to a generic, schema-described Zarr format"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "lerobot==0.4.1",
-  "tabular2mcap[protobuf]==0.1.12",
-  "av==15.1.0",
+  "numpy>=1.24",
+  "zarr>=2.18,<3",
+  "numcodecs>=0.12,<0.16",
   "spdlog>=2.0.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/XenseRobotics-AI/lerobot2mcap"
+Homepage = "https://github.com/XenseRobotics-AI/lerobot2mcap/tree/feature/lerobot2zarr"
 Repository = "https://github.com/XenseRobotics-AI/lerobot2mcap"
 Issues = "https://github.com/XenseRobotics-AI/lerobot2mcap/issues"
 
 [project.scripts]
-lerobot2mcap = "lerobot2mcap:main"
+lerobot2zarr = "lerobot2zarr.zarr_cli:main"
 
 [tool.setuptools]
-packages = ["lerobot2mcap"]
-
-[tool.setuptools.package-data]
-"*" = ["../configs/*.yaml"]
+packages = ["lerobot2zarr"]
 
 [tool.uv]
 package = true
